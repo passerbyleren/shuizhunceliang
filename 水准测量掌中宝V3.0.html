@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>三等水准测量记录表</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+        .hidden {
+            display: none;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        input[type="number"] {
+            width: 100%;
+            padding: 5px;
+            margin-top: 5px;
+            margin-bottom: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+        }
+        #resultTable {
+            margin-top: 20px;
+        }
+        #resultTable table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #resultTable th, #resultTable td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+        }
+        #resultTable th {
+            background-color: #f4f4f4;
+        }
+        .dialog {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            border: 1px solid #000;
+            padding: 20px;
+            background-color: #fff;
+            z-index: 1000;
+        }
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 密码保护 -->
+    <div id="passwordScreen" class="dialog">
+        <h3>请输入密码以访问测量记录表</h3>
+        <input type="password" id="passwordInput" placeholder="密码">
+        <button onclick="checkPassword()">确定</button>
+        <p id="passwordMessage" style="color:red;"></p>
+    </div>
+
+    <div id="overlay" class="overlay"></div>
+
+    <!-- 界面一：开始测量 -->
+    <div id="startScreen" class="hidden">
+        <button onclick="openMeasurementDialog()">开始测量</button>
+    </div>
+
+    <!-- 初始设置弹窗 -->
+    <div id="initialDialog" class="hidden">
+        <div class="section">
+            <label for="k1">K1 (起点值 mm)：</label>
+            <input type="number" id="k1" placeholder="K1 值">
+            <small>K1 为测量的第一站后尺的红面的起点值。</small>
+        </div>
+        <div class="section">
+            <label for="k2">K2 (起点值 mm)：</label>
+            <input type="number" id="k2" placeholder="K2 值">
+            <small>K2 为测量的第一站前尺的红面的起点值。</small>
+        </div>
+        <div class="section">
+            <label for="initialElevation">已知点高程 (m)：</label>
+            <input type="number" id="initialElevation" placeholder="高程">
+        </div>
+        <button onclick="confirmInitialValues()">确定</button>
+    </div>
+
+    <!-- 初始设置确认弹窗 -->
+    <div id="confirmDialog" class="dialog hidden">
+        <p>您输入的初始数据如下：</p>
+        <ul>
+            <li>K1：<span id="confirmK1"></span> mm</li>
+            <li>K2：<span id="confirmK2"></span> mm</li>
+            <li>已知点高程：<span id="confirmElevation"></span> m</li>
+        </ul>
+        <button onclick="startMeasurement()">确定</button>
+        <button onclick="closeConfirmDialog()">返回</button>
+    </div>
+
+    <!-- 温馨提示弹窗 -->
+    <div id="tipsDialog" class="dialog hidden">
+        <h3>温馨提示</h3>
+        <p>1. 开始正式测量后请注意单位。</p>
+        <p>2. 确定摆站点前，可以只输入前后视上下丝并点击“计算视距差”，快速得到视距差，方便摆站。</p>
+        <p>3. 可以输入部分数据后点击“计算结果”，显示本站部分计算结果，用于快速确定红黑面误差。</p>
+        <p>4. 返回上一站前确保本站数据已保存，只有点击“保存”或“下一站”按钮后数据才会保存，否则本站数据可能丢失。</p>
+        <button onclick="closeTipsDialog()">确定</button>
+    </div>
+
+    <!-- 保存和下一站前的提示弹窗 -->
+    <div id="alertDialog" class="dialog hidden">
+        <p>请先点击计算结果按钮后再进行保存或进入下一站。</p>
+        <button onclick="closeAlertDialog()">确定</button>
+    </div>
+
+    <!-- 界面二：测量站 -->
+    <div id="stationScreen" class="hidden">
+        <h3>站数：<span id="stationNumber">1</span></h3>
+
+        <!-- 后视部分 -->
+        <div class="section">
+            <h4>后视</h4>
+            <label>上丝 (mm)：</label><input type="number" class="backUpper"><br>
+            <label>下丝 (mm)：</label><input type="number" class="backLower"><br>
+            <label>黑面中丝 (mm)：</label><input type="number" class="backBlack"><br>
+            <label>红面中丝 (mm)：</label><input type="number" class="backRed">
+        </div>
+
+        <!-- 前视部分 -->
+        <div class="section">
+            <h4>前视</h4>
+            <label>上丝 (mm)：</label><input type="number" class="frontUpper"><br>
+            <label>下丝 (mm)：</label><input type="number" class="frontLower"><br>
+            <label>黑面中丝 (mm)：</label><input type="number" class="frontBlack"><br>
+            <label>红面中丝 (mm)：</label><input type="number" class="frontRed">
+        </div>
+
+        <!-- 计算结果 -->
+        <div class="section">
+            <h4>计算结果</h4>
+            <p>后视距 (m)：<span id="backDistance">0</span></p>
+            <p>前视距 (m)：<span id="frontDistance">0</span></p>
+            <p>视距差 (m)：<span id="sightDiff">0</span></p>
+            <p>累积视距差 (m)：<span id="cumulativeSightDiff">0</span></p>
+            <p>后尺红黑误差：<span id="k1Result">0</span></p>
+            <p>前尺红黑误差：<span id="k2Result">0</span></p>
+            <p>黑面高差：<span id="blackDiff">0</span></p>
+            <p>未修改红面高差：<span id="unmodifiedRedDiff">0</span></p>
+            <p>红面高差：<span id="redDiff">0</span></p>
+            <p>平均高差：<span id="averageDiff">0</span></p>
+            <p>累积平均高差 (mm)：<span id="cumulativeAverageDiff">0</span></p>
+            <p>站点高程 (m)：<span id="stationElevation">0</span></p>
+        </div>
+
+        <!-- 控制按钮 -->
+        <button onclick="previousStation()">返回上一站</button>
+        <button onclick="nextStation()">下一站</button>
+        <button onclick="saveStation()">保存</button>
+        <button onclick="endMeasurement()">结束本次测量</button>
+        <button onclick="calculateSightDiff()">计算视距差</button>
+        <button onclick="calculateResults()">计算结果</button>
+    </div>
+
+    <!-- 界面三：显示所有结果 -->
+    <div id="resultScreen" class="hidden">
+        <h3>测量结果</h3>
+        <div id="resultTable"></div>
+        <button onclick="restart()">开始下一次测量</button>
+    </div>
+
+    <script>
+        let stationNumber = 1;
+        let cumulativeSightDiff = 0;
+        let cumulativeAverageDiff = 0;
+        let currentK1 = 0;
+        let currentK2 = 0;
+        let initialElevation = 0;
+        let previousElevation = 0;
+        let resultCalculated = false;
+        let hasShownTips = false; // 标志是否已显示提示
+        const results = [];
+
+        function checkPassword() {
+            const password = document.getElementById('passwordInput').value;
+            const validPassword = "dxdd"; // 固定密码
+            if (password === validPassword) {
+                document.getElementById('passwordScreen').classList.add('hidden');
+                document.getElementById('overlay').classList.add('hidden');
+                document.getElementById('startScreen').classList.remove('hidden');
+            } else {
+                document.getElementById('passwordMessage').innerText = "密码错误，请重试。";
+            }
+        }
+
+        function openMeasurementDialog() {
+            document.getElementById('startScreen').classList.add('hidden');
+            document.getElementById('initialDialog').classList.remove('hidden');
+        }
+
+        function confirmInitialValues() {
+            document.getElementById('confirmK1').innerText = document.getElementById('k1').value;
+            document.getElementById('confirmK2').innerText = document.getElementById('k2').value;
+            document.getElementById('confirmElevation').innerText = document.getElementById('initialElevation').value;
+
+            document.getElementById('confirmDialog').classList.remove('hidden');
+            document.getElementById('overlay').classList.remove('hidden');
+        }
+
+        function closeConfirmDialog() {
+            document.getElementById('confirmDialog').classList.add('hidden');
+            document.getElementById('overlay').classList.add('hidden');
+        }
+
+        function closeAlertDialog() {
+            document.getElementById('alertDialog').classList.add('hidden');
+            document.getElementById('overlay').classList.add('hidden');
+        }
+
+        function closeTipsDialog() {
+            document.getElementById('tipsDialog').classList.add('hidden');
+            document.getElementById('overlay').classList.add('hidden');
+        }
+
+        function startMeasurement() {
+            currentK1 = parseFloat(document.getElementById('k1').value) || 0;
+            currentK2 = parseFloat(document.getElementById('k2').value) || 0;
+            initialElevation = parseFloat(document.getElementById('initialElevation').value) || 0;
+            previousElevation = initialElevation;
+            document.getElementById('initialDialog').classList.add('hidden');
+            document.getElementById('confirmDialog').classList.add('hidden');
+            document.getElementById('overlay').classList.add('hidden');
+            document.getElementById('stationScreen').classList.remove('hidden');
+
+            if (!hasShownTips) {
+                document.getElementById('tipsDialog').classList.remove('hidden');
+                document.getElementById('overlay').classList.remove('hidden');
+                hasShownTips = true;
+            }
+        }
+
+        function calculateSightDiff() {
+            const backUpper = parseFloat(document.querySelector('.backUpper').value) || 0;
+            const backLower = parseFloat(document.querySelector('.backLower').value) || 0;
+            const frontUpper = parseFloat(document.querySelector('.frontUpper').value) || 0;
+            const frontLower = parseFloat(document.querySelector('.frontLower').value) || 0;
+
+            const backDistance = (backUpper - backLower) / 10;
+            const frontDistance = (frontUpper - frontLower) / 10;
+            const sightDiff = backDistance - frontDistance;
+
+            document.getElementById('backDistance').innerText = backDistance.toFixed(3);
+            document.getElementById('frontDistance').innerText = frontDistance.toFixed(3);
+            document.getElementById('sightDiff').innerText = sightDiff.toFixed(3);
+
+            let tempCumulative = results.reduce((sum, result) => sum + result.sightDiff, 0);
+            document.getElementById('cumulativeSightDiff').innerText = (tempCumulative + sightDiff).toFixed(3);
+        }
+
+        function calculateResults() {
+            calculateSightDiff();
+
+            const backBlack = parseFloat(document.querySelector('.backBlack').value) || 0;
+            const backRed = parseFloat(document.querySelector('.backRed').value) || 0;
+            const frontBlack = parseFloat(document.querySelector('.frontBlack').value) || 0;
+            const frontRed = parseFloat(document.querySelector('.frontRed').value) || 0;
+
+            let currentBackK, currentFrontK;
+            if (stationNumber % 2 === 1) { // 奇数站
+                currentBackK = currentK1;
+                currentFrontK = currentK2;
+            } else { // 偶数站
+                currentBackK = currentK2;
+                currentFrontK = currentK1;
+            }
+
+            const k1Result = currentBackK + backBlack - backRed;
+            const k2Result = currentFrontK + frontBlack - frontRed;
+            const blackDiff = backBlack - frontBlack;
+            const redDiff = backRed - frontRed + currentFrontK - currentBackK;
+            const unmodifiedRedDiff = backRed - frontRed;
+            const averageDiff = (blackDiff + redDiff) / 2;
+
+            // 更新累积平均高差
+            cumulativeAverageDiff = results.reduce((sum, result) => sum + result.averageDiff, 0) + averageDiff;
+
+            const stationElevation = initialElevation + cumulativeAverageDiff / 1000;
+
+            document.getElementById('k1Result').innerText = k1Result.toFixed(2);
+            document.getElementById('k2Result').innerText = k2Result.toFixed(2);
+            document.getElementById('blackDiff').innerText = blackDiff.toFixed(2);
+            document.getElementById('unmodifiedRedDiff').innerText = unmodifiedRedDiff.toFixed(2);
+            document.getElementById('redDiff').innerText = redDiff.toFixed(2);
+            document.getElementById('averageDiff').innerText = averageDiff.toFixed(2);
+            document.getElementById('cumulativeAverageDiff').innerText = cumulativeAverageDiff.toFixed(2);
+            document.getElementById('stationElevation').innerText = stationElevation.toFixed(4);
+
+            resultCalculated = true;  // 标记已计算
+        }
+
+        function saveStation() {
+            if (!resultCalculated) {
+                showAlertDialog();
+                return;
+            }
+            saveCurrentStation();
+            updateCumulativeSightDiff();
+        }
+
+        function nextStation() {
+            if (!resultCalculated) {
+                showAlertDialog();
+                return;
+            }
+            saveCurrentStation();
+            stationNumber++;
+            document.getElementById('stationNumber').innerText = stationNumber;
+            loadStationData(stationNumber - 1);
+            resultCalculated = false; // 重置标记
+        }
+
+        function showAlertDialog() {
+            document.getElementById('alertDialog').classList.remove('hidden');
+            document.getElementById('overlay').classList.remove('hidden');
+        }
+
+        function saveCurrentStation() {
+            const sightDiff = parseFloat(document.getElementById('sightDiff').innerText);
+            const stationElevation = parseFloat(document.getElementById('stationElevation').innerText);
+            const averageDiff = parseFloat(document.getElementById('averageDiff').innerText);
+
+            previousElevation = stationElevation;
+
+            results[stationNumber - 1] = {
+                station: stationNumber,
+                backDistance: parseFloat(document.getElementById('backDistance').innerText),
+                frontDistance: parseFloat(document.getElementById('frontDistance').innerText),
+                sightDiff: sightDiff,
+                k1Result: parseFloat(document.getElementById('k1Result').innerText),
+                k2Result: parseFloat(document.getElementById('k2Result').innerText),
+                blackDiff: parseFloat(document.getElementById('blackDiff').innerText),
+                unmodifiedRedDiff: parseFloat(document.getElementById('unmodifiedRedDiff').innerText),
+                redDiff: parseFloat(document.getElementById('redDiff').innerText),
+                averageDiff: averageDiff,
+                stationElevation: stationElevation,
+                backUpper: parseFloat(document.querySelector('.backUpper').value) || 0,
+                backLower: parseFloat(document.querySelector('.backLower').value) || 0,
+                backBlack: parseFloat(document.querySelector('.backBlack').value) || 0,
+                backRed: parseFloat(document.querySelector('.backRed').value) || 0,
+                frontUpper: parseFloat(document.querySelector('.frontUpper').value) || 0,
+                frontLower: parseFloat(document.querySelector('.frontLower').value) || 0,
+                frontBlack: parseFloat(document.querySelector('.frontBlack').value) || 0,
+                frontRed: parseFloat(document.querySelector('.frontRed').value) || 0
+            };
+        }
+
+        function updateCumulativeSightDiff() {
+            cumulativeSightDiff = results.reduce((sum, result) => sum + result.sightDiff, 0);
+            document.getElementById('cumulativeSightDiff').innerText = cumulativeSightDiff.toFixed(3);
+        }
+
+        function previousStation() {
+            if (stationNumber > 1) {
+                stationNumber--;
+                document.getElementById('stationNumber').innerText = stationNumber;
+                loadStationData(stationNumber - 1);
+            }
+        }
+
+        function loadStationData(index) {
+            const data = results[index];
+            if (data) {
+                document.querySelector('.backUpper').value = data.backUpper;
+                document.querySelector('.backLower').value = data.backLower;
+                document.querySelector('.backBlack').value = data.backBlack;
+                document.querySelector('.backRed').value = data.backRed;
+                document.querySelector('.frontUpper').value = data.frontUpper;
+                document.querySelector('.frontLower').value = data.frontLower;
+                document.querySelector('.frontBlack').value = data.frontBlack;
+                document.querySelector('.frontRed').value = data.frontRed;
+
+                document.getElementById('backDistance').innerText = data.backDistance.toFixed(3);
+                document.getElementById('frontDistance').innerText = data.frontDistance.toFixed(3);
+                document.getElementById('sightDiff').innerText = data.sightDiff.toFixed(3);
+                document.getElementById('cumulativeSightDiff').innerText = cumulativeSightDiff.toFixed(3);
+                document.getElementById('k1Result').innerText = data.k1Result.toFixed(2);
+                document.getElementById('k2Result').innerText = data.k2Result.toFixed(2);
+                document.getElementById('blackDiff').innerText = data.blackDiff.toFixed(2);
+                document.getElementById('unmodifiedRedDiff').innerText = data.unmodifiedRedDiff.toFixed(2);
+                document.getElementById('redDiff').innerText = data.redDiff.toFixed(2);
+                document.getElementById('averageDiff').innerText = data.averageDiff.toFixed(2);
+                document.getElementById('cumulativeAverageDiff').innerText = cumulativeAverageDiff.toFixed(2);
+                document.getElementById('stationElevation').innerText = data.stationElevation.toFixed(4);
+            } else {
+                clearInputs();
+            }
+        }
+
+        function endMeasurement() {
+            displayResults();
+            document.getElementById('stationScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.remove('hidden');
+        }
+
+        function displayResults() {
+            const resultTable = document.getElementById('resultTable');
+            resultTable.innerHTML = `
+                <table>
+                    <tr>
+                        <th>站数</th><th>后视距 (m)</th><th>前视距 (m)</th><th>视距差 (m)</th>
+                        <th>累积视距差 (m)</th><th>后尺红黑误差</th><th>前尺红黑误差</th>
+                        <th>黑面高差</th><th>未修改红面高差</th><th>红面高差</th><th>平均高差</th><th>累积平均高差 (mm)</th><th>站点高程 (m)</th>
+                    </tr>`;
+            
+            results.forEach(result => {
+                resultTable.innerHTML += `
+                    <tr>
+                        <td>${result.station}</td><td>${result.backDistance.toFixed(3)}</td>
+                        <td>${result.frontDistance.toFixed(3)}</td><td>${result.sightDiff.toFixed(3)}</td>
+                        <td>${cumulativeSightDiff.toFixed(3)}</td><td>${result.k1Result.toFixed(2)}</td>
+                        <td>${result.k2Result.toFixed(2)}</td><td>${result.blackDiff.toFixed(2)}</td>
+                        <td>${result.unmodifiedRedDiff.toFixed(2)}</td><td>${result.redDiff.toFixed(2)}</td>
+                        <td>${result.averageDiff.toFixed(2)}</td><td>${cumulativeAverageDiff.toFixed(2)}</td><td>${result.stationElevation.toFixed(4)}</td>
+                    </tr>`;
+            });
+            
+            resultTable.innerHTML += '</table>';
+        }
+
+        function restart() {
+            stationNumber = 1;
+            cumulativeSightDiff = 0;
+            cumulativeAverageDiff = 0;
+            previousElevation = initialElevation;
+            results.length = 0;
+            resultCalculated = false;
+
+            document.getElementById('stationNumber').innerText = stationNumber;
+            document.getElementById('cumulativeSightDiff').innerText = '0';
+
+            clearInputs();
+            document.getElementById('resultScreen').classList.add('hidden');
+            document.getElementById('startScreen').classList.remove('hidden');
+        }
+
+        function clearInputs() {
+            document.querySelectorAll('#stationScreen input[type="number"]').forEach(input => {
+                input.value = '';
+            });
+
+            document.getElementById('backDistance').innerText = '0';
+            document.getElementById('frontDistance').innerText = '0';
+            document.getElementById('sightDiff').innerText = '0';
+            document.getElementById('cumulativeSightDiff').innerText = '0';
+            document.getElementById('k1Result').innerText = '0';
+            document.getElementById('k2Result').innerText = '0';
+            document.getElementById('blackDiff').innerText = '0';
+            document.getElementById('unmodifiedRedDiff').innerText = '0';
+            document.getElementById('redDiff').innerText = '0';
+            document.getElementById('averageDiff').innerText = '0';
+            document.getElementById('cumulativeAverageDiff').innerText = '0';
+            document.getElementById('stationElevation').innerText = '0';
+        }
+    </script>
+
+</body>
+</html>
+
